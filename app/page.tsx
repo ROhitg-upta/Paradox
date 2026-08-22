@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+
 
 
 type Tile =
@@ -318,6 +319,31 @@ const levels: Level[] = [
   },
 ];
 
+// Per-level contextual safe-step messages.
+// These reinforce each chamber's epistemic theme through the existing event-banner UI.
+// No new state or failure modes are introduced.
+//
+// Mechanics that cannot be implemented fairly with the current data model:
+//   Level 4 (conditional): enforcing "safe only after a downward move" requires a
+//     lastMoveDirection state and a new failure mode not described by the grid —
+//     this would be a hidden rule. Documented here; not implemented.
+//   Level 7 (memory): the decisionTrace resets on every level. True cross-level
+//     memory would require persistence (localStorage or server). Faking it with
+//     a flag would be dishonest. The clue text already conveys the theme; no
+//     mechanical change is added.
+//   Cross-level progression tracking beyond highestLevel: out of scope for the
+//     current single-component architecture.
+const levelMessages: Record<number, string> = {
+  1: "Safe route confirmed. The luminous path holds.",
+  2: "Step recorded. The signal remains unverified.",
+  3: "Decision logged. Colour-coded claims carry no guarantee.",
+  4: "Move accepted. Conditional statements require their conditions to be met.",
+  5: "Observation recorded. The board's evidence outranks the narrator's claim.",
+  6: "Step valid. Exactly one statement in this chamber can be true.",
+  7: "Pattern recorded. The system is watching which signals you approach.",
+  8: "Path accepted. The only safe route is the one you can justify.",
+};
+
 const directionDelta: Record<Direction, Position> = {
   UP: { row: -1, col: 0 },
   DOWN: { row: 1, col: 0 },
@@ -361,6 +387,106 @@ export default function Home() {
   const [message, setMessage] = useState(
     "The chamber is waiting for a decision."
   );
+
+  // Refs for focus management
+  // levelMapTriggerRef  — the "LEVEL MAP ↗" button that opens the map modal
+  // levelMapCloseRef    — the "×" close button inside the map modal (focus-on-open)
+  // enterChamberRef     — the "ENTER CHAMBER →" button (focus-on-open for briefing)
+  // tryAgainRef         — the "TRY AGAIN" button (focus-on-open for result modal)
+  const levelMapTriggerRef = useRef<HTMLButtonElement>(null);
+  const levelMapCloseRef = useRef<HTMLButtonElement>(null);
+  const enterChamberRef = useRef<HTMLButtonElement>(null);
+  const tryAgainRef = useRef<HTMLButtonElement>(null);
+
+  // --- Audio system ---
+  // soundEnabled is OFF by default. AudioContext is never created until the user
+  // explicitly turns sound ON (an explicit user gesture, satisfying browser policy).
+  const [soundEnabled, setSoundEnabled] = useState(false);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+
+  // Cue types map to distinct timbres so each event is clearly distinguishable.
+  type SoundCue = "movement" | "blocked" | "danger" | "win";
+
+  const playSound = useCallback((cue: SoundCue): void => {
+    if (!soundEnabled) return;
+    try {
+      // Reuse the existing context; create one only if absent or closed.
+      if (!audioCtxRef.current || audioCtxRef.current.state === "closed") {
+        audioCtxRef.current = new AudioContext();
+      }
+      const ctx = audioCtxRef.current;
+      if (ctx.state === "suspended") {
+        void ctx.resume();
+      }
+
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      // Keep volume low and non-annoying across all cues.
+      const BASE_GAIN = 0.07;
+
+      switch (cue) {
+        case "movement": {
+          // Soft high blip — short sine, quick fade
+          osc.type = "sine";
+          osc.frequency.setValueAtTime(880, now);
+          gain.gain.setValueAtTime(BASE_GAIN, now);
+          gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.08);
+          osc.start(now);
+          osc.stop(now + 0.08);
+          break;
+        }
+        case "blocked": {
+          // Low short click — triangle, very brief
+          osc.type = "triangle";
+          osc.frequency.setValueAtTime(110, now);
+          gain.gain.setValueAtTime(BASE_GAIN, now);
+          gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.06);
+          osc.start(now);
+          osc.stop(now + 0.06);
+          break;
+        }
+        case "danger": {
+          // Short descending tone — sawtooth sweep down
+          osc.type = "sawtooth";
+          osc.frequency.setValueAtTime(440, now);
+          osc.frequency.exponentialRampToValueAtTime(110, now + 0.25);
+          gain.gain.setValueAtTime(BASE_GAIN, now);
+          gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.25);
+          osc.start(now);
+          osc.stop(now + 0.25);
+          break;
+        }
+        case "win": {
+          // Two-tone confirmation — two sine notes, staggered
+          const osc2 = ctx.createOscillator();
+          const gain2 = ctx.createGain();
+          osc2.connect(gain2);
+          gain2.connect(ctx.destination);
+
+          osc.type = "sine";
+          osc.frequency.setValueAtTime(523, now);         // C5
+          gain.gain.setValueAtTime(BASE_GAIN, now);
+          gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.15);
+          osc.start(now);
+          osc.stop(now + 0.15);
+
+          osc2.type = "sine";
+          osc2.frequency.setValueAtTime(784, now + 0.12); // G5
+          gain2.gain.setValueAtTime(BASE_GAIN, now + 0.12);
+          gain2.gain.exponentialRampToValueAtTime(0.0001, now + 0.32);
+          osc2.start(now + 0.12);
+          osc2.stop(now + 0.32);
+          break;
+        }
+      }
+    } catch {
+      // Web Audio unavailable or blocked — gameplay continues unaffected.
+    }
+  }, [soundEnabled]);
 
   const level = levels[levelIndex];
 
@@ -440,12 +566,14 @@ setMoves(0);
       if (outside) {
         setLastEvent("blocked");
         setMessage("Boundary rejected. There is no chamber beyond it.");
+        playSound("blocked");
         return;
       }
 
       if (level.grid[next.row][next.col] === "wall") {
         setLastEvent("blocked");
         setMessage("Blocked. The board refuses that decision.");
+        playSound("blocked");
         return;
       }
 
@@ -458,6 +586,7 @@ setMoves(0);
         setMistakes((value) => value + 1);
         setStatus("failed");
         setMessage("PARADOX DETECTED: the statement was false.");
+        playSound("danger");
         return;
       }
 
@@ -478,6 +607,7 @@ setMoves(0);
         });
 
         setMessage("Verification complete. You found the exit.");
+        playSound("win");
         return;
       }
 
@@ -491,9 +621,17 @@ setMoves(0);
         ...current.slice(-5),
         `${direction} → ${nextKey}`,
       ]);
-      setMessage("Decision recorded. Continue without surrendering judgment.");
+      const baseMessage =
+        levelMessages[level.id] ??
+        "Decision recorded. Continue without surrendering judgment.";
+      const nudge =
+        (level.id === 6 || level.id === 8) && analyzedClues.length === 0
+          ? " Inspect the clues before committing to a route."
+          : "";
+      setMessage(baseMessage + nudge);
+      playSound("movement");
     },
-   [level, levelIndex, player, showBriefing, showLevelSelect, status]
+   [analyzedClues.length, level, levelIndex, player, playSound, showBriefing, showLevelSelect, status]
   );
 
   useEffect(() => {
@@ -523,6 +661,13 @@ setMoves(0);
       if (event.key === "r" || event.key === "R") {
         resetLevel();
       }
+
+      // Escape closes only the Level Map modal.
+      // Briefing and result modals are intentionally non-dismissible.
+      if (event.key === "Escape" && showLevelSelect) {
+        setShowLevelSelect(false);
+        levelMapTriggerRef.current?.focus();
+      }
     }
 
     window.addEventListener("keydown", handleKeyDown);
@@ -530,7 +675,7 @@ setMoves(0);
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [move, resetLevel]);
+  }, [levelMapTriggerRef, move, resetLevel, showLevelSelect]);
 
   useEffect(() => {
     if (status !== "playing" || showBriefing) return;
@@ -541,6 +686,39 @@ setMoves(0);
 
     return () => window.clearInterval(timer);
   }, [showBriefing, showLevelSelect, status]);
+
+  // Focus management: move focus into the modal when it opens.
+  // Level Map — focus the close button (first meaningful action).
+  useEffect(() => {
+    if (showLevelSelect) {
+      levelMapCloseRef.current?.focus();
+    }
+  }, [showLevelSelect]);
+
+  // Briefing — focus "ENTER CHAMBER →" when the briefing appears.
+  // Fires on initial page load and on every new chamber briefing.
+  useEffect(() => {
+    if (showBriefing) {
+      enterChamberRef.current?.focus();
+    }
+  }, [showBriefing]);
+
+  // Result (won / failed) — focus "TRY AGAIN" so keyboard users can act immediately.
+  useEffect(() => {
+    if (status !== "playing") {
+      tryAgainRef.current?.focus();
+    }
+  }, [status]);
+
+  // Close AudioContext on unmount to release OS audio resources.
+  useEffect(() => {
+    return () => {
+      if (audioCtxRef.current && audioCtxRef.current.state !== "closed") {
+        void audioCtxRef.current.close();
+      }
+    };
+  }, []);
+
   function analyzeClue(clue: Clue) {
     setAnalyzedClues((current) =>
       current.includes(clue.id) ? current : [...current, clue.id]
@@ -580,6 +758,23 @@ setMoves(0);
     seconds % 60
   ).padStart(2, "0")}`;
 
+  // Performance rating — derived only from existing state, no hidden rules.
+  // S: perfect run, 6 moves or fewer
+  // A: no mistakes, 8 moves or fewer
+  // B: no mistakes, more than 8 moves
+  // C: one or more mistakes
+  const rating: "S" | "A" | "B" | "C" =
+    mistakes === 0 && moves <= 6
+      ? "S"
+      : mistakes === 0 && moves <= 8
+      ? "A"
+      : mistakes === 0
+      ? "B"
+      : "C";
+
+  // Show special ending copy only when the final chamber is won.
+  const isFinalWin = status === "won" && levelIndex === levels.length - 1;
+
   const eventText =
     lastEvent === "lie"
       ? "The statement failed verification."
@@ -610,7 +805,10 @@ setMoves(0);
     <main className="paradox-app">
       <div className="noise" />
 
-      <div className="app-frame">
+      <div
+        className="app-frame"
+        {...((showBriefing || showLevelSelect || status !== "playing") ? { inert: true } : {})}
+      >
        <header className="header">
   <div className="logo-group">
     <div className="logo">P</div>
@@ -629,7 +827,35 @@ setMoves(0);
     </div>
 
     <button
+      className={`sound-toggle ${soundEnabled ? "sound-on" : ""}`}
+      aria-pressed={soundEnabled}
+      aria-label={soundEnabled ? "Disable sound" : "Enable sound"}
+      onClick={() => {
+        const next = !soundEnabled;
+        setSoundEnabled(next);
+        if (next) {
+          // Create or resume AudioContext on this explicit user gesture.
+          try {
+            if (
+              !audioCtxRef.current ||
+              audioCtxRef.current.state === "closed"
+            ) {
+              audioCtxRef.current = new AudioContext();
+            } else if (audioCtxRef.current.state === "suspended") {
+              void audioCtxRef.current.resume();
+            }
+          } catch {
+            // AudioContext unavailable — sound simply stays silent.
+          }
+        }
+      }}
+    >
+      SOUND: {soundEnabled ? "ON" : "OFF"}
+    </button>
+
+    <button
       className="level-select-trigger"
+      ref={levelMapTriggerRef}
       onClick={() => setShowLevelSelect(true)}
     >
       LEVEL MAP <span>↗</span>
@@ -932,7 +1158,13 @@ setMoves(0);
       </div>
 
       <div className={`modal-layer ${showBriefing ? "active" : ""}`}>
-        <div className="modal">
+        <div
+            className="modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="briefing-title"
+            aria-describedby="briefing-desc"
+          >
           <div className="modal-mark">P</div>
           {levelIndex === 0 && highestLevel > 0 && (
   <button
@@ -962,8 +1194,8 @@ setMoves(0);
   </button>
 )}
           <div className="overline cyan">INCOMING TRANSMISSION</div>
-          <h2>{level.title}</h2>
-          <p>{level.subtitle}</p>
+          <h2 id="briefing-title">{level.title}</h2>
+          <p id="briefing-desc">{level.subtitle}</p>
 
           <div className="modal-warning">
             The system may provide information.
@@ -973,6 +1205,7 @@ setMoves(0);
 
           <button
             className="primary"
+            ref={enterChamberRef}
             onClick={() => {
               setShowBriefing(false);
               setSignalInspected(false);
@@ -984,7 +1217,13 @@ setMoves(0);
       </div>
 
       <div className={`modal-layer ${status !== "playing" ? "active" : ""}`}>
-        <div className={`modal result ${status}`}>
+        <div
+            className={`modal result ${status}`}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="result-title"
+            aria-describedby="result-desc"
+          >
           <div className="result-mark">{status === "won" ? "✦" : "!"}</div>
 
           <div className="overline">
@@ -993,20 +1232,53 @@ setMoves(0);
               : "SYSTEM INTERRUPTION"}
           </div>
 
-          <h2>{status === "won" ? "Paradox Solved" : "The Game Lied"}</h2>
-          <p>{message}</p>
+          <h2 id="result-title">{status === "won" ? "Paradox Solved" : "The Game Lied"}</h2>
+          <p id="result-desc">{message}</p>
 
           <div className="result-data">
             <span>
               MOVES <strong>{moves}</strong>
             </span>
             <span>
+              ERRORS <strong className={mistakes > 0 ? "danger-text" : ""}>{mistakes}</strong>
+            </span>
+            <span>
               TRUST <strong>{trust}%</strong>
+            </span>
+            <span>
+              TIME <strong>{time}</strong>
+            </span>
+            <span>
+              CLUES <strong>{analyzedClues.length}</strong>
             </span>
           </div>
 
+          <div className="result-rating" aria-label={`Performance rating: ${rating}`}>
+            <span className="overline">PERFORMANCE</span>
+            <strong className={`rating-badge rating-${rating.toLowerCase()}`}>
+              {rating}
+            </strong>
+            <span className="rating-label">
+              {rating === "S"
+                ? "Flawless verification"
+                : rating === "A"
+                ? "Verified without error"
+                : rating === "B"
+                ? "Verified — excess steps"
+                : "Verification compromised"}
+            </span>
+          </div>
+
+          {isFinalWin && (
+            <div className="result-ending" aria-label="Final chamber message">
+              <p>&ldquo;You did not escape the board.&rdquo;</p>
+              <p>&ldquo;You escaped the assumption that the board was telling the truth.&rdquo;</p>
+              <p className="overline cyan">PROTOCOL COMPLETE: VERIFY_BEFORE_TRUST</p>
+            </div>
+          )}
+
           <div className="result-actions">
-            <button className="secondary" onClick={resetLevel}>
+            <button className="secondary" ref={tryAgainRef} onClick={resetLevel}>
               ↻ TRY AGAIN
             </button>
 
@@ -1025,15 +1297,21 @@ setMoves(0);
         </div>
       </div>
       <div className={`modal-layer ${showLevelSelect ? "active" : ""}`}>
-  <div className="modal level-map-modal">
+  <div
+      className="modal level-map-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="levelmap-title"
+    >
     <div className="modal-topline">
       <div>
         <div className="overline cyan">NAVIGATION SYSTEM</div>
-        <h2>Level Map</h2>
+        <h2 id="levelmap-title">Level Map</h2>
       </div>
 
       <button
         className="modal-close"
+        ref={levelMapCloseRef}
         onClick={() => setShowLevelSelect(false)}
         aria-label="Close level map"
       >

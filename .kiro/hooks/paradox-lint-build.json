@@ -1,0 +1,16 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "Paradox — Lint & Build on Core File Save",
+      "trigger": "PostFileSave",
+      "description": "After app/page.tsx or app/globals.css is saved, runs eslint then a production build from the project root. Reports the exact command and full output if either step fails.",
+      "matcher": "app[\\\\/](page\\.tsx|globals\\.css)$",
+      "action": {
+        "type": "command",
+        "command": "cd \"c:\\Users\\rohit\\OneDrive\\Desktop\\New folder\\Paradox\" && echo \"=== LINT ===\" && npm run lint 2>&1 && echo \"=== BUILD ===\" && npm run build 2>&1",
+        "timeout": 120
+      }
+    }
+  ]
+}
