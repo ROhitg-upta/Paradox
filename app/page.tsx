@@ -348,6 +348,7 @@ export default function Home() {
   const [showHint, setShowHint] = useState(false);
   const [showLevelSelect, setShowLevelSelect] = useState(false);
   const [analyzedClues, setAnalyzedClues] = useState<string[]>([]);
+  const [signalInspected, setSignalInspected] = useState(false);
   const [message, setMessage] = useState(
     "The chamber is waiting for a decision."
   );
@@ -370,6 +371,7 @@ export default function Home() {
   setShowBriefing(false);
   setShowHint(false);
   setAnalyzedClues([]);
+  setSignalInspected(false);
   setMessage("The chamber reset. Your memory did not.");
 }, [level]);
 
@@ -406,6 +408,7 @@ setMoves(0);
     setShowBriefing(true);
     setShowHint(false);
     setAnalyzedClues([]);
+    setSignalInspected(false);
     setMessage("New chamber detected. Do not assume continuity.");
   }, [levelIndex]);
 
@@ -604,6 +607,10 @@ window.setTimeout(() => setBoardPulse(false), 180);
       ? "·"
       : "○";
 
+  const signalStatus = signalInspected
+    ? "SIGNAL INSPECTED"
+    : "SIGNAL UNVERIFIED";
+
   return (
     <main className="paradox-app">
       <div className="noise" />
@@ -695,6 +702,15 @@ window.setTimeout(() => setBoardPulse(false), 180);
                         key={`${rowIndex}-${colIndex}`}
                         className={tileClass(tile, position)}
                         role="gridcell"
+                        onClick={() => {
+                          if (tile !== "signal") return;
+
+                          setSignalInspected(true);
+                          setLastEvent("movement");
+                          setMessage(
+                            "Signal inspected. Attractive information is not verified information."
+                          );
+                        }}
                         aria-label={
                           samePosition(player, position)
                             ? "Your current position"
@@ -733,6 +749,11 @@ window.setTimeout(() => setBoardPulse(false), 180);
               <span className="position">
                 POS {player.row + 1}:{player.col + 1}
               </span>
+            </div>
+
+            <div className="signal-status" aria-live="polite">
+              <span className="overline amber">SIGNAL STATUS</span>
+              <strong>{signalStatus}</strong>
             </div>
 
             <div
@@ -937,6 +958,7 @@ window.setTimeout(() => setBoardPulse(false), 180);
   setLastEvent("none");
   setDecisionTrace([]);
   setAnalyzedClues([]);
+  setSignalInspected(false);
   setShowHint(false);
   setMessage("Saved sequence restored. The system remembers.");
 }}
@@ -1055,6 +1077,7 @@ setMoves(0);
               setMistakes(0);
               setSeconds(0);
               setAnalyzedClues([]);
+              setSignalInspected(false);
               setShowHint(false);
               setShowLevelSelect(false);
               setShowBriefing(true);

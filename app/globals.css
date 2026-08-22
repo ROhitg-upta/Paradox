@@ -1646,3 +1646,30 @@ button:focus-visible {
     animation: none;
   }
 }
+.signal-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid rgba(245, 190, 72, 0.24);
+  background: rgba(245, 190, 72, 0.04);
+}
+
+.signal-status strong {
+  color: #f5be48;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+}
+
+.tile-signal {
+  cursor: pointer;
+}
+
+.tile-signal:hover {
+  border-color: rgba(245, 190, 72, 0.8);
+  box-shadow:
+    inset 0 0 22px rgba(245, 190, 72, 0.16),
+    0 0 18px rgba(245, 190, 72, 0.12);
+}
