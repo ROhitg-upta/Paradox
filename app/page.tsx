@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+
 type Tile =
   | "start"
   | "empty"
@@ -901,6 +902,7 @@ window.setTimeout(() => setBoardPulse(false), 180);
   setMistakes(0);
   setSeconds(0);
   setLastEvent("none");
+  setDecisionTrace([]);
   setAnalyzedClues([]);
   setShowHint(false);
   setMessage("Saved sequence restored. The system remembers.");
@@ -1014,7 +1016,6 @@ window.setTimeout(() => setBoardPulse(false), 180);
               setLevelIndex(index);
 setPlayer(levels[index].start);
 setStatus("playing");
-setLastEvent("none");
 setDecisionTrace([]);
 setDecisionTrace([]);
 setMoves(0);
