@@ -551,6 +551,9 @@ window.setTimeout(() => setBoardPulse(false), 180);
 
   function tileClass(tile: Tile, position: Position) {
     const classes = ["tile", `tile-${tile}`];
+    if (tile === "signal") {
+  classes.push("tile-signal");
+}
 
     if (samePosition(player, position)) classes.push("tile-player");
     if (samePosition(level.goal, position)) classes.push("tile-goal");
@@ -561,14 +564,19 @@ window.setTimeout(() => setBoardPulse(false), 180);
     return classes.join(" ");
   }
 
-  function tileSymbol(tile: Tile, position: Position) {
-    if (samePosition(player, position)) return "◆";
-    if (samePosition(level.goal, position)) return "✦";
-    if (tile === "wall") return "▦";
-    if (tile === "signal") return "◉";
-    if (tile === "danger") return "!";
-    return "";
+ function tileSymbol(tile: Tile, position: Position) {
+  if (samePosition(player, position)) return "◆";
+  if (samePosition(level.goal, position)) return "✦";
+  if (tile === "wall") return "▦";
+
+  if (level.danger.includes(positionKey(position))) {
+    return "!";
   }
+
+  if (tile === "signal") return "◉";
+
+  return "";
+}
 
   const time = `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(
     seconds % 60
@@ -669,6 +677,8 @@ window.setTimeout(() => setBoardPulse(false), 180);
             <div className="board-area">
               <div
                className={`board ${boardPulse ? "board-pulse" : ""}`}
+                role="grid"
+                aria-label={`${level.code} puzzle board. Player position ${player.row + 1}, ${player.col + 1}.`}
                 style={{
                   gridTemplateColumns: `repeat(${level.grid[0].length}, 1fr)`,
                 }}
@@ -684,6 +694,20 @@ window.setTimeout(() => setBoardPulse(false), 180);
                       <div
                         key={`${rowIndex}-${colIndex}`}
                         className={tileClass(tile, position)}
+                        role="gridcell"
+                        aria-label={
+                          samePosition(player, position)
+                            ? "Your current position"
+                            : samePosition(level.goal, position)
+                            ? "Exit"
+                            : tile === "wall"
+                            ? "Blocked wall"
+                            : level.danger.includes(positionKey(position))
+                            ? "Unstable danger tile"
+                            : tile === "signal"
+                            ? "Signal tile. Verify before trusting."
+                            : "Open tile"
+                        }
                       >
                         {tileSymbol(tile, position)}
                       </div>
@@ -711,12 +735,21 @@ window.setTimeout(() => setBoardPulse(false), 180);
               </span>
             </div>
 
-            <div className={`event-banner ${lastEvent}`}>
+            <div
+  className={`event-banner ${lastEvent}`}
+  role="status"
+  aria-live="polite"
+  aria-atomic="true"
+>
               <span>{eventSymbol}</span>
               <p>{eventText}</p>
             </div>
 
-            <div className="mobile-controls" aria-label="Movement controls">
+            <div
+              className="mobile-controls"
+              aria-label="Movement controls"
+              role="group"
+            >
               <button onClick={() => move("UP")} aria-label="Move up">
                 ↑
               </button>
