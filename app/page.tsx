@@ -335,7 +335,16 @@ function samePosition(first: Position, second: Position) {
 
 export default function Home() {
   const [levelIndex, setLevelIndex] = useState(0);
-  const [highestLevel, setHighestLevel] = useState(0);
+  const [highestLevel, setHighestLevel] = useState(() => {
+    if (typeof window === "undefined") return 0;
+    const saved = window.localStorage.getItem("paradox-highest-level");
+    const parsed = Number(saved);
+    return Number.isInteger(parsed) &&
+      parsed >= 0 &&
+      parsed < levels.length
+      ? parsed
+      : 0;
+  });
   const [player, setPlayer] = useState<Position>(levels[0].start);
   const [status, setStatus] = useState<GameStatus>("playing");
   const [lastEvent, setLastEvent] = useState<LastEvent>("none");
@@ -410,11 +419,11 @@ setMoves(0);
     setAnalyzedClues([]);
     setSignalInspected(false);
     setMessage("New chamber detected. Do not assume continuity.");
-  }, [levelIndex]);
+  }, [highestLevel, levelIndex]);
 
   const move = useCallback(
     (direction: Direction) => {
-      if (status !== "playing" || showBriefing) return;
+      if (status !== "playing" || showBriefing || showLevelSelect) return;
 
       const delta = directionDelta[direction];
       const next = {
@@ -442,18 +451,9 @@ setMoves(0);
 
       const nextKey = positionKey(next);
 
-      setPlayer(next);
-      setMoves((value) => value + 1);
-      setLastEvent("movement");
-      setBoardPulse(true);
-window.setTimeout(() => setBoardPulse(false), 180);
-      setDecisionTrace((current) => [
-  ...current.slice(-5),
-  `${direction} → ${nextKey}`,
-]);
-
-
+      // Check outcome before committing any movement state.
       if (level.danger.includes(nextKey)) {
+        setPlayer(next);
         setLastEvent("lie");
         setMistakes((value) => value + 1);
         setStatus("failed");
@@ -462,27 +462,38 @@ window.setTimeout(() => setBoardPulse(false), 180);
       }
 
       if (samePosition(next, level.goal)) {
-  setLastEvent("truth");
-  setStatus("won");
+        setPlayer(next);
+        setLastEvent("truth");
+        setStatus("won");
 
-  setHighestLevel((current) => {
-    const nextHighest = Math.max(current, levelIndex);
+        setHighestLevel((current) => {
+          const nextHighest = Math.max(current, levelIndex);
 
-    window.localStorage.setItem(
-      "paradox-highest-level",
-      String(nextHighest)
-    );
+          window.localStorage.setItem(
+            "paradox-highest-level",
+            String(nextHighest)
+          );
 
-    return nextHighest;
-  });
+          return nextHighest;
+        });
 
-  setMessage("Verification complete. You found the exit.");
-  return;
-}
+        setMessage("Verification complete. You found the exit.");
+        return;
+      }
 
+      // Safe tile — record the step.
+      setPlayer(next);
+      setMoves((value) => value + 1);
+      setLastEvent("movement");
+      setBoardPulse(true);
+      window.setTimeout(() => setBoardPulse(false), 180);
+      setDecisionTrace((current) => [
+        ...current.slice(-5),
+        `${direction} → ${nextKey}`,
+      ]);
       setMessage("Decision recorded. Continue without surrendering judgment.");
     },
-   [level, levelIndex, player, showBriefing, status]
+   [level, levelIndex, player, showBriefing, showLevelSelect, status]
   );
 
   useEffect(() => {
@@ -529,23 +540,7 @@ window.setTimeout(() => setBoardPulse(false), 180);
     }, 1000);
 
     return () => window.clearInterval(timer);
-  }, [showBriefing, status]);
-  useEffect(() => {
-  const savedLevel = window.localStorage.getItem("paradox-highest-level");
-
-  if (savedLevel) {
-    const parsedLevel = Number(savedLevel);
-
-    if (
-      Number.isInteger(parsedLevel) &&
-      parsedLevel >= 0 &&
-      parsedLevel < levels.length
-    ) {
-      setHighestLevel(parsedLevel);
-    }
-  }
-}, []);
-
+  }, [showBriefing, showLevelSelect, status]);
   function analyzeClue(clue: Clue) {
     setAnalyzedClues((current) =>
       current.includes(clue.id) ? current : [...current, clue.id]
@@ -978,7 +973,10 @@ window.setTimeout(() => setBoardPulse(false), 180);
 
           <button
             className="primary"
-            onClick={() => setShowBriefing(false)}
+            onClick={() => {
+              setShowBriefing(false);
+              setSignalInspected(false);
+            }}
           >
             ENTER CHAMBER →
           </button>
